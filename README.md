@@ -1,5 +1,11 @@
 # Drone Package Tracker
 
+## Information
+Levon Green II
+Huntsville, AL
+email me: LevonGreen2@gmail.com
+Discord: https://discordapp.com/users/461941058784460821
+
 ## Overview
 
 Drone Package Tracker is a desktop application that provides real-time tracking and monitoring of autonomous delivery drones within a local neighborhood. This project enables visualization and remote interaction with drones as they transport meals from pickup locations to delivery destinations.
