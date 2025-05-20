@@ -7,6 +7,7 @@ from PyQt5.QtCore import QTimer, QUrl, QObject, pyqtSlot
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWebChannel import QWebChannel
 from backend import DroneManager
+from PyQt5.QtWidgets import QCheckBox
 
 class JSBridge(QObject):
     def __init__(self, parent=None):
@@ -26,23 +27,35 @@ class PackageTrackerApp(QWidget):
         self.timer.timeout.connect(self.update_data)
         self.timer.start(1000)
 
-    def initUI(self):
+    def initUI(self,):
         self.setWindowTitle('Drone Package Tracker')
         self.setGeometry(100, 100, 1000, 600)
 
         self.layout = QHBoxLayout()
 
+        # Max size for left drone List and buttons
+        max_size = 250
+
         self.droneList = QListWidget()
+        self.droneList.setFixedWidth(max_size)
         self.droneList.itemClicked.connect(self.center_on_drone)
         self.addDroneBtn = QPushButton("Add Drone")
+        self.addDroneBtn.setFixedWidth(max_size)
         self.addDroneBtn.clicked.connect(self.add_drone)
+
+        ## Auto Assign check box
+        self.autoColorCheckBox = QCheckBox("Auto-Assign Drone Colors")
+        self.leftLayout = QVBoxLayout()  # Make sure this is not None
+        self.autoColorCheckBox.setChecked(False)  # default is manual
+
         self.removeDroneBtn = QPushButton("Remove Drone")
+        self.removeDroneBtn.setFixedWidth(max_size)
         self.removeDroneBtn.clicked.connect(self.remove_drone)
 
-        leftLayout = QVBoxLayout()
-        leftLayout.addWidget(self.droneList)
-        leftLayout.addWidget(self.addDroneBtn)
-        leftLayout.addWidget(self.removeDroneBtn)
+        self.leftLayout.addWidget(self.droneList)
+        self.leftLayout.addWidget(self.addDroneBtn)
+        self.leftLayout.addWidget(self.removeDroneBtn)
+        self.leftLayout.addWidget(self.autoColorCheckBox)
 
         self.map_view = QWebEngineView()
         self.bridge = JSBridge()
@@ -52,7 +65,7 @@ class PackageTrackerApp(QWidget):
 
         self.generate_map_html()
 
-        self.layout.addLayout(leftLayout)
+        self.layout.addLayout(self.leftLayout)
         self.layout.addWidget(self.map_view)
 
         self.setLayout(self.layout)
@@ -124,11 +137,24 @@ class PackageTrackerApp(QWidget):
         self.map_view.setUrl(QUrl.fromLocalFile(os.path.abspath('map.html')))
 
     def add_drone(self):
+
+        # if auto-assign color check box is selected, color is generated
+        # else user manually picks with color picker window
         drone_id = f"Drone_{len(self.manager.drones)+1}"
-        color = QColorDialog.getColor()
-        if not color.isValid():
-            return
-        self.drone_colors[drone_id] = color.name()
+        if self.autoColorCheckBox.isChecked():
+            # Auto-assign color
+            import colorsys
+            total = len(self.manager.drones)
+            hue = (total * 0.618033988749895) % 1  # Golden ratio-based hue
+            r, g, b = [int(x * 255) for x in colorsys.hsv_to_rgb(hue, 0.8, 0.95)]
+            color = f"#{r:02x}{g:02x}{b:02x}"
+        else:
+            # Manual color picker
+            qcolor = QColorDialog.getColor()
+            if not qcolor.isValid():
+                return
+            color = qcolor.name()
+        self.drone_colors[drone_id] = color
         self.manager.add_drone(drone_id)
         self.droneList.addItem(drone_id)
 
