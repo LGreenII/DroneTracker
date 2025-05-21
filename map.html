@@ -17,13 +17,22 @@
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; OpenStreetMap contributors'
             }).addTo(map);
-
+            
             let droneMarkers = {};
             let dronePaths = {};
 
             new QWebChannel(qt.webChannelTransport, function(channel) {
                 window.bridge = channel.objects.bridge;
             });
+            
+            map.on('click', function(e) {
+                let lat = e.latlng.lat;
+                let lon = e.latlng.lng;
+                if (window.bridge && window.bridge.mapClicked) {
+                    window.bridge.mapClicked(lat, lon);
+                }
+            });
+
 
             window.updateDrone = function(drone_id, lat, lon, trail, popup, color) {
                 if (droneMarkers[drone_id]) {
@@ -31,7 +40,15 @@
                 } else {
                     let marker = L.circleMarker([lat, lon], { radius: 6, color: color }).addTo(map);
                     marker.bindPopup(popup);
-                    droneMarkers[drone_id] = marker;
+
+                    // NEW: Right-click listener
+                marker.on('contextmenu', function(e) {
+                    if (window.bridge && window.bridge.droneRightClicked) {
+                    window.bridge.droneRightClicked(drone_id);
+                    }
+                });
+
+droneMarkers[drone_id] = marker;
                 }
 
                 if (dronePaths[drone_id]) {

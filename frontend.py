@@ -8,10 +8,24 @@ from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWebChannel import QWebChannel
 from backend import DroneManager
 from PyQt5.QtWidgets import QCheckBox
+from PyQt5.QtCore import pyqtSlot, pyqtSignal, QPropertyAnimation, QEasingCurve
+from PyQt5.QtCore import Qt
 
+## Map Click Signal
 class JSBridge(QObject):
+    mapClickedSignal = pyqtSignal(float, float)  # lat, lon
+    droneRightClickedSignal = pyqtSignal(str) # droneID of drone to be removed
+
     def __init__(self, parent=None):
         super().__init__(parent)
+
+    @pyqtSlot(float, float)
+    def mapClicked(self, lat, lon):
+        self.mapClickedSignal.emit(lat, lon)
+
+    @pyqtSlot(str)
+    def droneRightClicked(self, drone_id):  # slot for listening for right click
+        self.droneRightClickedSignal.emit(drone_id)
 
 class PackageTrackerApp(QWidget):
     def __init__(self):
@@ -59,6 +73,8 @@ class PackageTrackerApp(QWidget):
 
         self.map_view = QWebEngineView()
         self.bridge = JSBridge()
+        self.bridge.mapClickedSignal.connect(self.add_drone_at_location) #Add Drone on left click
+        self.bridge.droneRightClickedSignal.connect(self.remove_drone_by_id) #remove drone on right click
         self.channel = QWebChannel()
         self.channel.registerObject("bridge", self.bridge)
         self.map_view.page().setWebChannel(self.channel)
@@ -69,6 +85,53 @@ class PackageTrackerApp(QWidget):
         self.layout.addWidget(self.map_view)
 
         self.setLayout(self.layout)
+
+    def add_drone_at_location(self, lat, lon):
+        drone_id = f"Drone_{len(self.manager.drones) + 1}"
+        if self.autoColorCheckBox.isChecked():
+            import colorsys
+            total = len(self.manager.drones)
+            hue = (total * 0.618033988749895) % 1
+            r, g, b = [int(x * 255) for x in colorsys.hsv_to_rgb(hue, 0.8, 0.95)]
+            color = f"#{r:02x}{g:02x}{b:02x}"
+        else:
+            qcolor = QColorDialog.getColor()
+            if not qcolor.isValid():
+                return
+            color = qcolor.name()
+
+        self.drone_colors[drone_id] = color
+
+        # Add a new DroneSensorInterface and override the initial coordinates
+        self.manager.add_drone(drone_id)
+        self.manager.drones[drone_id].latitude = lat
+        self.manager.drones[drone_id].longitude = lon
+        self.manager.drones[drone_id].trail = [(lat, lon)]
+
+        self.droneList.addItem(drone_id)
+
+    def remove_drone_by_id(self, drone_id):
+        reply = QMessageBox.question(
+            self,
+            'Confirm Removal',
+            f"Are you sure you want to remove {drone_id}?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            if drone_id in self.manager.drones:
+                self.manager.remove_drone(drone_id)
+                self.drone_colors.pop(drone_id, None)
+                self.telemetry_data.pop(drone_id, None)
+                self.map_view.page().runJavaScript(f"removeDrone('{drone_id}')")
+
+                # Remove from list widget
+                items = self.droneList.findItems(drone_id, Qt.MatchExactly)
+                if items:
+                    index = self.droneList.row(items[0])
+                    self.droneList.takeItem(index)
+
+                self.show_toast(f"{drone_id} has been removed.")
 
     def generate_map_html(self):
         html_content = '''
@@ -90,13 +153,22 @@ class PackageTrackerApp(QWidget):
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; OpenStreetMap contributors'
             }).addTo(map);
-
+            
             let droneMarkers = {};
             let dronePaths = {};
 
             new QWebChannel(qt.webChannelTransport, function(channel) {
                 window.bridge = channel.objects.bridge;
             });
+            
+            map.on('click', function(e) {
+                let lat = e.latlng.lat;
+                let lon = e.latlng.lng;
+                if (window.bridge && window.bridge.mapClicked) {
+                    window.bridge.mapClicked(lat, lon);
+                }
+            });
+
 
             window.updateDrone = function(drone_id, lat, lon, trail, popup, color) {
                 if (droneMarkers[drone_id]) {
@@ -104,7 +176,15 @@ class PackageTrackerApp(QWidget):
                 } else {
                     let marker = L.circleMarker([lat, lon], { radius: 6, color: color }).addTo(map);
                     marker.bindPopup(popup);
-                    droneMarkers[drone_id] = marker;
+
+                    // NEW: Right-click listener
+                marker.on('contextmenu', function(e) {
+                    if (window.bridge && window.bridge.droneRightClicked) {
+                    window.bridge.droneRightClicked(drone_id);
+                    }
+                });
+
+droneMarkers[drone_id] = marker;
                 }
 
                 if (dronePaths[drone_id]) {
@@ -170,6 +250,7 @@ class PackageTrackerApp(QWidget):
                 self.telemetry_data.pop(drone_id, None)
                 self.map_view.page().runJavaScript(f"removeDrone('{drone_id}')")
                 self.droneList.takeItem(self.droneList.row(selected_item))
+                self.show_toast(f"{drone_id} has been removed.")
 
     def update_data(self):
         self.telemetry_data = self.manager.get_all_telemetry()
@@ -190,6 +271,44 @@ class PackageTrackerApp(QWidget):
             lat = self.telemetry_data[drone_id]['latitude']
             lon = self.telemetry_data[drone_id]['longitude']
             self.map_view.page().runJavaScript(f"centerOnDrone({lat}, {lon})")
+
+    def show_toast(self, message, duration=2000):
+        toast = QLabel(message, self)
+        toast.setStyleSheet("""
+                background-color: rgba(50, 50, 50, 200);
+                color: white;
+                padding: 10px;
+                border-radius: 5px;
+            """)
+        toast.setWindowFlags(Qt.ToolTip)
+        toast.adjustSize()
+
+        x = self.width() - toast.width() - 20
+        y = self.height() - toast.height() - 20
+        toast.move(x, y)
+        toast.show()
+
+        # Keep a reference to avoid garbage collection
+        animation = QPropertyAnimation(toast, b"windowOpacity", self)
+        animation.setDuration(1000)
+        animation.setStartValue(1.0)
+        animation.setEndValue(0.0)
+        animation.setEasingCurve(QEasingCurve.InOutQuad)
+
+        # Wait before starting the fade-out
+        QTimer.singleShot(duration, animation.start)
+
+        # Clean up
+        def cleanup():
+            toast.deleteLater()
+            self._active_toasts.remove(animation)
+
+        animation.finished.connect(cleanup)
+
+        # Store the animation to keep it alive
+        if not hasattr(self, '_active_toasts'):
+            self._active_toasts = []
+        self._active_toasts.append(animation)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
