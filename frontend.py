@@ -86,7 +86,7 @@ class PackageTrackerApp(QWidget):
         <body>
         <div id="map"></div>
         <script>
-            let map = L.map('map').setView([40.75, -73.95], 11);
+            let map = L.map('map').setView([34.7295, -86.5853], 11);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; OpenStreetMap contributors'
             }).addTo(map);
